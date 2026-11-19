@@ -1,0 +1,262 @@
+import mysql.connector
+
+# Change this password to your MySQL root password
+MYSQL_HOST = "localhost"
+MYSQL_USER = "root"
+MYSQL_PASSWORD = "your_password_here"
+DB_NAME = "inventory_db"
+
+
+def get_connection():
+    # Connects to the MySQL database
+    con = mysql.connector.connect(
+        host=MYSQL_HOST,
+        user=MYSQL_USER,
+        passwd=MYSQL_PASSWORD,
+        database=DB_NAME
+    )
+    return con
+
+
+def initialize_db():
+    # Creates the database and table automatically if they do not exist
+    con = mysql.connector.connect(
+        host=MYSQL_HOST,
+        user=MYSQL_USER,
+        passwd=MYSQL_PASSWORD
+    )
+    cur = con.cursor()
+    cur.execute("CREATE DATABASE IF NOT EXISTS " + DB_NAME)
+    cur.execute("USE " + DB_NAME)
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS items ("
+        "item_name VARCHAR(50) PRIMARY KEY, "
+        "price FLOAT, "
+        "quantity INT)"
+    )
+    con.commit()
+    cur.close()
+    con.close()
+
+
+def display_inventory():
+    con = get_connection()
+    cur = con.cursor()
+    cur.execute("SELECT * FROM items")
+    records = cur.fetchall()
+
+    if len(records) == 0:
+        print("\nInventory is currently empty.")
+    else:
+        print("\n------------------------------------------------")
+        print("ITEM NAME\t\tPRICE\t\tQUANTITY")
+        print("------------------------------------------------")
+        for row in records:
+            print(str(row[0]) + "\t\t" + str(row[1]) + "\t\t" + str(row[2]))
+        print("------------------------------------------------")
+
+    cur.close()
+    con.close()
+
+
+def add_item():
+    name = input("Enter item name (use underscores for spaces, e.g., salted_peanuts): ").strip().lower()
+
+    con = get_connection()
+    cur = con.cursor()
+
+    # Check if item already exists
+    cur.execute("SELECT * FROM items WHERE item_name = %s", (name,))
+    record = cur.fetchone()
+
+    if record is not None:
+        print("Item already exists! Use the update options instead.")
+        cur.close()
+        con.close()
+        return
+
+    try:
+        price = float(input("Enter price: "))
+        qty = int(input("Enter initial quantity: "))
+    except ValueError:
+        print("Invalid input! Price must be a number and quantity must be an integer.")
+        cur.close()
+        con.close()
+        return
+
+    query = "INSERT INTO items (item_name, price, quantity) VALUES (%s, %s, %s)"
+    cur.execute(query, (name, price, qty))
+    con.commit()
+    print("Item '" + name + "' added successfully.")
+
+    cur.close()
+    con.close()
+
+
+def change_price():
+    name = input("Enter item name to update price: ").strip().lower()
+
+    con = get_connection()
+    cur = con.cursor()
+
+    cur.execute("SELECT * FROM items WHERE item_name = %s", (name,))
+    record = cur.fetchone()
+
+    if record is None:
+        print("Item not found in inventory.")
+    else:
+        try:
+            new_price = float(input("Enter new price: "))
+            query = "UPDATE items SET price = %s WHERE item_name = %s"
+            cur.execute(query, (new_price, name))
+            con.commit()
+            print("Price updated successfully.")
+        except ValueError:
+            print("Invalid price entered!")
+
+    cur.close()
+    con.close()
+
+
+def change_quantity():
+    name = input("Enter item name to change quantity: ").strip().lower()
+
+    con = get_connection()
+    cur = con.cursor()
+
+    cur.execute("SELECT * FROM items WHERE item_name = %s", (name,))
+    record = cur.fetchone()
+
+    if record is None:
+        print("Item not found in inventory.")
+    else:
+        current_qty = record[2]
+        print("Current quantity of", name, "is:", current_qty)
+        print("1. Add stock (Restock)")
+        print("2. Set exact new quantity")
+        mode = input("Choose option (1 or 2): ").strip()
+
+        try:
+            amount = int(input("Enter quantity value: "))
+            if mode == "1":
+                new_qty = current_qty + amount
+            elif mode == "2":
+                new_qty = amount
+            else:
+                print("Invalid option selected.")
+                cur.close()
+                con.close()
+                return
+
+            query = "UPDATE items SET quantity = %s WHERE item_name = %s"
+            cur.execute(query, (new_qty, name))
+            con.commit()
+            print("Quantity updated successfully. New stock:", new_qty)
+        except ValueError:
+            print("Invalid quantity! Please enter a whole number.")
+
+    cur.close()
+    con.close()
+
+
+def delete_item():
+    name = input("Enter item name to delete: ").strip().lower()
+
+    con = get_connection()
+    cur = con.cursor()
+
+    cur.execute("SELECT * FROM items WHERE item_name = %s", (name,))
+    record = cur.fetchone()
+
+    if record is None:
+        print("Item not found in inventory.")
+    else:
+        cur.execute("DELETE FROM items WHERE item_name = %s", (name,))
+        con.commit()
+        print("Item '" + name + "' deleted from records.")
+
+    cur.close()
+    con.close()
+
+
+def raw_deduct(item_name, count):
+    # Reduces the item count when entered raw like "salted_peanuts 3"
+    name = item_name.lower()
+
+    con = get_connection()
+    cur = con.cursor()
+
+    cur.execute("SELECT * FROM items WHERE item_name = %s", (name,))
+    record = cur.fetchone()
+
+    if record is None:
+        print("Item '" + name + "' not found in inventory.")
+    else:
+        price = record[1]
+        current_qty = record[2]
+
+        if count < 0:
+            print("Deduction count must be positive!")
+        elif current_qty >= count:
+            new_qty = current_qty - count
+            total_cost = count * price
+
+            query = "UPDATE items SET quantity = %s WHERE item_name = %s"
+            cur.execute(query, (new_qty, name))
+            con.commit()
+
+            print("Deducted", count, "from", name + ".")
+            print("Total Bill Amount:", total_cost)
+            print("Remaining Stock:", new_qty)
+        else:
+            print("Not enough stock! Current quantity is only", current_qty)
+
+    cur.close()
+    con.close()
+
+
+# --- MAIN PROGRAM ---
+initialize_db()
+
+while True:
+    print("\n=== MYSQL INVENTORY MANAGEMENT MENU ===")
+    print("1. Display Inventory")
+    print("2. Add New Item")
+    print("3. Change Price")
+    print("4. Change Quantity (Restock / Set)")
+    print("5. Delete Item")
+    print("6. Exit")
+    print("OR type '[item_name] [number]' directly to reduce stock (e.g., salted_peanuts 3)")
+
+    user_input = input("\nEnter choice or raw item deduction: ").strip()
+
+    if user_input == "":
+        continue
+
+    words = user_input.split()
+
+    # Check if the user entered raw deduction format: "salted_peanuts 3"
+    if len(words) == 2:
+        item_name = words[0]
+        try:
+            deduct_qty = int(words[1])
+            raw_deduct(item_name, deduct_qty)
+        except ValueError:
+            print("Invalid count! Use format: item_name number (e.g., salted_peanuts 3)")
+
+    # Standard Menu Options
+    elif user_input == "1":
+        display_inventory()
+    elif user_input == "2":
+        add_item()
+    elif user_input == "3":
+        change_price()
+    elif user_input == "4":
+        change_quantity()
+    elif user_input == "5":
+        delete_item()
+    elif user_input == "6":
+        print("Exiting program. Goodbye!")
+        break
+    else:
+        print("Invalid choice! Please enter a menu number (1-6) or 'item_name count'.")
